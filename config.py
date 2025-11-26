@@ -1,0 +1,3 @@
+import uuid
+SECRET_UUID = uuid.UUID('00010203-0405-0607-0809-0a0b0c0d0e0f')
+ADMIN_UUID = '826997e2-3bb3-4350-acae-1cee126aa36a'
