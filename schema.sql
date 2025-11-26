@@ -61,7 +61,7 @@ CREATE TABLE movie_actor (
 
 -- TABLA: user_movie
 CREATE TABLE user_movie (
-    uuid_user VARCHAR(100) REFERENCES users(uuid_user) ON DELETE CASCADE,
+    uuid_user VARCHAR(100) REFERENCES users(uuid_user),
     movie_id INTEGER REFERENCES movies(movie_id) ON DELETE CASCADE,
     score INTEGER CHECK (score >= 1 AND score <= 10),
     PRIMARY KEY (uuid_user, movie_id)
@@ -69,7 +69,7 @@ CREATE TABLE user_movie (
 
 -- TABLA: shopping_cart
 CREATE TABLE shopping_cart (
-    uuid_user VARCHAR(100) REFERENCES users(uuid_user) ON DELETE CASCADE,
+    uuid_user VARCHAR(100) REFERENCES users(uuid_user),
     movie_id INTEGER REFERENCES movies(movie_id) ON DELETE CASCADE,
     quantity INTEGER CHECK (quantity > 0),
     PRIMARY KEY (uuid_user, movie_id)
@@ -78,7 +78,7 @@ CREATE TABLE shopping_cart (
 -- TABLA: orders
 CREATE TABLE orders (
     order_id SERIAL PRIMARY KEY,
-    uuid_user VARCHAR(100) REFERENCES users(uuid_user) ON DELETE CASCADE,
+    uuid_user VARCHAR(100) REFERENCES users(uuid_user),
     order_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     payment_date TIMESTAMP,
     total DECIMAL(10,2) CHECK (total >= 0)
@@ -86,7 +86,7 @@ CREATE TABLE orders (
 
 -- TABLA: order_details
 CREATE TABLE order_details (
-    order_id INTEGER REFERENCES orders(order_id) ON DELETE CASCADE,
+    order_id INTEGER REFERENCES orders(order_id),
     movie_id INTEGER REFERENCES movies(movie_id) ON DELETE CASCADE,
     quantity INTEGER CHECK (quantity > 0),
     unit_price DECIMAL(5,2) CHECK (unit_price >= 0),
@@ -94,7 +94,7 @@ CREATE TABLE order_details (
 );
 
 CREATE TABLE IF NOT EXISTS ratings (
-  uuid_user  VARCHAR(100) REFERENCES users(uuid_user) ON DELETE CASCADE,
+  uuid_user  VARCHAR(100) REFERENCES users(uuid_user),
   movie_id   INTEGER      REFERENCES movies(movie_id) ON DELETE CASCADE,
   score      INTEGER      NOT NULL CHECK (score BETWEEN 1 AND 5),
   PRIMARY KEY (uuid_user, movie_id)
