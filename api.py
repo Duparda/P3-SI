@@ -901,6 +901,168 @@ async def get_customers_without_orders():
         "count": len(result),
         "users": result
     }), 200
-        
 
+@app.delete("/borraPais/<pais>")
+async def delete_user_country(pais):
+    if not is_admin(request.headers):
+        return jsonify({"error": "No autorizado"}), 403
+
+    async with engine.connect() as conn:
+        exists = await conn.execute(
+            text("SELECT COUNT(*) FROM users WHERE LOWER(nationality) = LOWER(:pais)"),
+            {"pais": pais})
+        count = exists.scalar()
+
+        if count == 0:
+            return jsonify({"error": f"No hay usuarios del país {pais}"}), 404
+        
+        trans = await conn.begin()
+        try:
+            await conn.execute(
+                text("DELETE FROM shopping_cart WHERE uuid_user IN (SELECT uuid_user FROM users WHERE LOWER(nationality) = LOWER(:pais))"),
+                {"pais": pais})
+            
+            await conn.execute(
+                text("DELETE FROM cart_totals WHERE uuid_user IN (SELECT uuid_user FROM users WHERE LOWER(nationality) = LOWER(:pais))"),
+                {"pais": pais})
+            
+            await conn.execute(
+                text("DELETE FROM ratings WHERE uuid_user IN (SELECT uuid_user FROM users WHERE LOWER(nationality) = LOWER(:pais))"),
+                {"pais": pais})
+            
+            await conn.execute(
+                text("DELETE FROM user_movie WHERE uuid_user IN (SELECT uuid_user FROM users WHERE LOWER(nationality) = LOWER(:pais))"),
+                {"pais": pais})
+            
+            await conn.execute(
+                text("DELETE FROM order_details WHERE order_id IN (SELECT order_id FROM orders WHERE uuid_user IN (SELECT uuid_user FROM users WHERE LOWER(nationality) = LOWER(:pais)))"),
+                {"pais": pais})
+            
+            await conn.execute(
+                text("DELETE FROM orders WHERE uuid_user IN (SELECT uuid_user FROM users WHERE LOWER(nationality) = LOWER(:pais))"),
+                {"pais": pais})
+            
+            await conn.execute(
+                text("DELETE FROM users WHERE LOWER(nationality) = LOWER(:pais)"),
+                {"pais": pais})
+            
+            await trans.commit()
+            
+        except Exception as e:
+            await trans.rollback()
+            return jsonify({"error": f"Error al eliminar usuarios: {str(e)}"}), 500
     
+    return jsonify({"deleted_country": pais, "deleted_users": count}), 200
+
+@app.delete("/borraPaisIncorrecto/<pais>")
+async def delete_user_country_incorrect(pais):
+    if not is_admin(request.headers):
+        return jsonify({"error": "No autorizado"}), 403
+
+    async with engine.connect() as conn:
+        exists = await conn.execute(
+            text("SELECT COUNT(*) FROM users WHERE LOWER(nationality) = LOWER(:pais)"),
+            {"pais": pais})
+        count = exists.scalar()
+
+        if count == 0:
+            return jsonify({"error": f"No hay usuarios del país {pais}"}), 404
+        
+        trans = await conn.begin()
+
+        try:
+            await conn.execute(
+                text("DELETE FROM shopping_cart WHERE uuid_user IN (SELECT uuid_user FROM users WHERE LOWER(nationality) = LOWER(:pais))"),
+                {"pais": pais})
+            
+            await conn.execute(
+                text("DELETE FROM cart_totals WHERE uuid_user IN (SELECT uuid_user FROM users WHERE LOWER(nationality) = LOWER(:pais))"),
+                {"pais": pais})
+            
+            #momento en el que borramos antes de tiempo los registros en la tabla user y aun tienen hijos, lo que lanzara el error de fk
+            await conn.execute(
+                text("DELETE FROM users WHERE LOWER(nationality) = LOWER(:pais)"),
+                {"pais": pais})
+            
+            await conn.execute(
+                text("DELETE FROM ratings WHERE uuid_user IN (SELECT uuid_user FROM users WHERE LOWER(nationality) = LOWER(:pais))"),
+                {"pais": pais})
+            
+            await conn.execute(
+                text("DELETE FROM user_movie WHERE uuid_user IN (SELECT uuid_user FROM users WHERE LOWER(nationality) = LOWER(:pais))"),
+                {"pais": pais})
+            
+            await conn.execute(
+                text("DELETE FROM order_details WHERE order_id IN (SELECT order_id FROM orders WHERE uuid_user IN (SELECT uuid_user FROM users WHERE LOWER(nationality) = LOWER(:pais)))"),
+                {"pais": pais})
+            
+            await conn.execute(
+                text("DELETE FROM orders WHERE uuid_user IN (SELECT uuid_user FROM users WHERE LOWER(nationality) = LOWER(:pais))"),
+                {"pais": pais})
+            
+            await trans.commit()
+        
+        except IntegrityError as e:
+            await trans.rollback()
+            print("Error de clave foránea:", e)
+            return jsonify({"error": "Error de foreign key. Rollback realizado"}), 409
+    
+    return jsonify({"deleted_country": pais, "deleted_users": count}), 200
+
+@app.delete("/borraPaisIntermedio/<pais>")
+async def delete_user_country_intermediate(pais):
+    if not is_admin(request.headers):
+        return jsonify({"error": "No autorizado"}), 403
+
+    async with engine.connect() as conn:
+        exists = await conn.execute(
+            text("SELECT COUNT(*) FROM users WHERE LOWER(nationality) = LOWER(:pais)"),
+            {"pais": pais})
+        count = exists.scalar()
+
+        if count == 0:
+            return jsonify({"error": f"No hay usuarios del país {pais}"}), 404
+        
+        trans = await conn.begin()
+
+        try:
+            await conn.execute(
+                text("DELETE FROM shopping_cart WHERE uuid_user IN (SELECT uuid_user FROM users WHERE LOWER(nationality) = LOWER(:pais))"),
+                {"pais": pais})
+            
+            await conn.execute(
+                text("DELETE FROM cart_totals WHERE uuid_user IN (SELECT uuid_user FROM users WHERE LOWER(nationality) = LOWER(:pais))"),
+                {"pais": pais})
+            
+            await trans.commit() #hacemos el commit antes de producir el fallo, para que se guarde lo anterior al error
+            trans = await conn.begin() #abrimos nueva transaccion
+
+            #provocamos el error que hara saltar la excepcion por eliminar registros con hijos
+            await conn.execute(
+                text("DELETE FROM users WHERE LOWER(nationality) = LOWER(:pais)"),
+                {"pais": pais})
+            
+            await conn.execute(
+                text("DELETE FROM ratings WHERE uuid_user IN (SELECT uuid_user FROM users WHERE LOWER(nationality) = LOWER(:pais))"),
+                {"pais": pais})
+            
+            await conn.execute(
+                text("DELETE FROM user_movie WHERE uuid_user IN (SELECT uuid_user FROM users WHERE LOWER(nationality) = LOWER(:pais))"),
+                {"pais": pais})
+            
+            await conn.execute(
+                text("DELETE FROM order_details WHERE order_id IN (SELECT order_id FROM orders WHERE uuid_user IN (SELECT uuid_user FROM users WHERE LOWER(nationality) = LOWER(:pais)))"),
+                {"pais": pais})
+            
+            await conn.execute(
+                text("DELETE FROM orders WHERE uuid_user IN (SELECT uuid_user FROM users WHERE LOWER(nationality) = LOWER(:pais))"),
+                {"pais": pais})
+            
+            await trans.commit()
+
+        except IntegrityError as e:
+            await trans.rollback() #El rollback debe ser al commit anterior, es decir se deben haber eliminado las dos entradas previas al error
+            print("Error de clave foránea:", e)
+            return jsonify({"error": "Error de foreign key. Rollback realizado"}), 409
+
+    return jsonify({"deleted_country": pais, "deleted_users": count}), 200
