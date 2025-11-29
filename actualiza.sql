@@ -103,25 +103,36 @@ FOR EACH ROW EXECUTE FUNCTION actualizar_avg_score();
 
 
 CREATE OR REPLACE FUNCTION procesar_pago()
-RETURN TRIGGER AS $$
+RETURNS TRIGGER AS $$
 DECLARE 
-    nuevo_saldo DECIMAL(10,2);
     descuento DECIMAL(5,2);
+    precio_final DECIMAL(10,2);
 BEGIN 
+    -- 1) Bloqueamos primero cart_totals para este usuario
+    UPDATE cart_totals
+    SET total = total  -- o lo que quieras, incluso total = total
+    WHERE uuid_user = NEW.uuid_user;
+
+    -- 2) Mantenemos el bloqueo un rato
+    PERFORM pg_sleep(10);
+
+    -- 3) Ahora leemos el descuento
     SELECT discount INTO descuento
-    FROM users WHERE uuid_user = NEW.uuid_user
+    FROM users WHERE uuid_user = NEW.uuid_user;
 
     precio_final := NEW.total * (1 - descuento/100);
 
     NEW.payment_date := CURRENT_TIMESTAMP;
 
+    -- 4) Intentamos actualizar users (aquí necesitaremos el lock de users)
     UPDATE users
-    SET balance = balance - total_final
+    SET balance = balance - precio_final
     WHERE uuid_user = NEW.uuid_user;
 
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
+
 
 CREATE TRIGGER trg_pago_order
 BEFORE INSERT ON orders

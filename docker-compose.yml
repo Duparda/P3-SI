@@ -10,6 +10,7 @@ services:
     volumes:
       - ./schema.sql:/docker-entrypoint-initdb.d/1_schema.sql:ro
       - ./populate.sql:/docker-entrypoint-initdb.d/2_populate.sql:ro
+      - ./actualiza.sql:/docker-entrypoint-initdb.d/3_actualiza.sql:ro
       - db_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U alumnodb -d si1"]
