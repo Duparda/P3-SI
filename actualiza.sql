@@ -21,8 +21,17 @@ CREATE OR REPLACE FUNCTION ajustar_stock()
 RETURNS TRIGGER AS $$
 DECLARE
     cantidad_diff INTEGER;
+    stock_actual INTEGER;
 BEGIN
     IF TG_OP = 'INSERT' THEN
+        SELECT stock INTO stock_actual
+        FROM movies
+        WHERE movie_id = NEW.movie_id;
+
+        IF stock_actual < NEW.quantity THEN
+            RAISE EXCEPTION 'Stock insuficiente para la película %', NEW.movie_id;
+        END IF;
+
         cantidad_diff := NEW.quantity;
 
         UPDATE movies
@@ -35,6 +44,16 @@ BEGIN
     ELSIF TG_OP = 'UPDATE' THEN
         cantidad_diff := NEW.quantity - OLD.quantity;
 
+        IF cantidad_diff > 0 THEN
+            SELECT stock INTO stock_actual
+            FROM movies
+            WHERE movie_id = NEW.movie_id;
+
+            IF stock_actual < cantidad_diff THEN
+                RAISE EXCEPTION 'Stock insuficiente para la película %', NEW.movie_id;
+            END IF;
+        END IF;
+
         UPDATE movies
         SET stock = stock - cantidad_diff
         WHERE movie_id = NEW.movie_id;
@@ -43,12 +62,14 @@ BEGIN
         RETURN NEW;
 
     ELSIF TG_OP = 'DELETE' THEN
-        cantidad_diff := OLD.quantity;
+        IF NOT OLD.purchased THEN
+            cantidad_diff := OLD.quantity;
 
-        UPDATE movies
-        SET stock = stock + cantidad_diff
-        WHERE movie_id = OLD.movie_id;
-
+            UPDATE movies
+            SET stock = stock + cantidad_diff
+            WHERE movie_id = OLD.movie_id;
+        END IF;
+        
         PERFORM actualizar_total_carrito(OLD.uuid_user);
         RETURN OLD;
     END IF;
@@ -107,24 +128,22 @@ RETURNS TRIGGER AS $$
 DECLARE 
     descuento DECIMAL(5,2);
     precio_final DECIMAL(10,2);
+    saldo_actual DECIMAL(8,1);
 BEGIN 
-    -- 1) Bloqueamos primero cart_totals para este usuario
-    UPDATE cart_totals
-    SET total = total  -- o lo que quieras, incluso total = total
-    WHERE uuid_user = NEW.uuid_user;
-
-    -- 2) Mantenemos el bloqueo un rato
-    PERFORM pg_sleep(10);
-
-    -- 3) Ahora leemos el descuento
-    SELECT discount INTO descuento
+    
+    SELECT discount, balance INTO descuento, saldo_actual
     FROM users WHERE uuid_user = NEW.uuid_user;
 
     precio_final := NEW.total * (1 - descuento/100);
 
+    IF saldo_actual < precio_final THEN
+        RAISE EXCEPTION 'Saldo insuficiente. Saldo: %, Precio: %', saldo_actual, precio_final;
+    END IF;
+
     NEW.payment_date := CURRENT_TIMESTAMP;
 
-    -- 4) Intentamos actualizar users (aquí necesitaremos el lock de users)
+    NEW.total := precio_final;
+
     UPDATE users
     SET balance = balance - precio_final
     WHERE uuid_user = NEW.uuid_user;
@@ -137,6 +156,21 @@ $$ LANGUAGE plpgsql;
 CREATE TRIGGER trg_pago_order
 BEFORE INSERT ON orders
 FOR EACH ROW EXECUTE FUNCTION procesar_pago();
+
+
+CREATE OR REPLACE FUNCTION inicializar_cart_totals()
+RETURNS TRIGGER AS $$
+BEGIN
+    INSERT INTO cart_totals (uuid_user, total)
+    VALUES (NEW.uuid_user, 0);
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_user_insert
+AFTER INSERT ON users
+FOR EACH ROW EXECUTE FUNCTION inicializar_cart_totals();
+
 
 CREATE OR REPLACE PROCEDURE calcular_media_pelicula(p_movie INTEGER)
 LANGUAGE plpgsql AS $$

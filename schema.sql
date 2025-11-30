@@ -72,6 +72,7 @@ CREATE TABLE shopping_cart (
     uuid_user VARCHAR(100) REFERENCES users(uuid_user),
     movie_id INTEGER REFERENCES movies(movie_id) ON DELETE CASCADE,
     quantity INTEGER CHECK (quantity > 0),
+    purchased BOOLEAN DEFAULT FALSE,
     PRIMARY KEY (uuid_user, movie_id)
 );
 

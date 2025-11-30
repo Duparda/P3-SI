@@ -228,13 +228,6 @@ async def checkout():
             return jsonify({"error": "Usuario no encontrado"}), 404
         if float(saldo) < total:
             return jsonify({"error": "Saldo insuficiente", "total": total, "saldo": float(saldo)}), 402
-
-        
-        await conn.execute(text("""
-                UPDATE users
-                SET balance = balance - :total
-                WHERE uuid_user = :uid"""), {"total": total, "uid": uid})
-
         
         pedido = await conn.execute(
             text("""
@@ -251,6 +244,12 @@ async def checkout():
                 FROM shopping_cart c
                 JOIN movies m ON m.movie_id = c.movie_id
                 WHERE c.uuid_user = :uid"""), {"id_pedido": id_pedido, "uid": uid})
+
+        await conn.execute(
+            text("""
+                UPDATE shopping_cart
+                SET purchased = TRUE
+                WHERE uuid_user = :uid"""), {"uid": uid})
 
         await conn.execute(
             text("DELETE FROM shopping_cart WHERE uuid_user = :uid"),
