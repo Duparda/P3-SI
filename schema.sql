@@ -93,13 +93,14 @@ CREATE TABLE order_details (
     PRIMARY KEY (order_id, movie_id)
 );
 
+-- TABLA: ratings
 CREATE TABLE IF NOT EXISTS ratings (
   uuid_user  VARCHAR(100) REFERENCES users(uuid_user),
   movie_id   INTEGER      REFERENCES movies(movie_id) ON DELETE CASCADE,
   score      INTEGER      NOT NULL CHECK (score BETWEEN 1 AND 5),
   PRIMARY KEY (uuid_user, movie_id)
 );
-
+ -- TABLA: cart_totals
 CREATE TABLE cart_totals (
     uuid_user VARCHAR(100) PRIMARY KEY REFERENCES users(uuid_user),
     total NUMERIC(10,2) DEFAULT 0 CHECK (total >= 0)

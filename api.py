@@ -364,6 +364,49 @@ async def get_movie_rating(id_pelicula: int):
         "avg": (float(stats["avg"]) if stats["avg"] is not None else None)
     }), 200
 
+# ver si un usuario ha valorado una película y qué puntuación le dio
+@app.get("/movies/<int:id_pelicula>/user_rating")
+async def get_user_movie_rating(id_pelicula: int):
+    token = get_token(request.headers)
+    if not validate_token(token):
+        return jsonify({"error": "No autorizado"}), 401
+    uid = parse_uid_from_token(token)
+
+    async with engine.connect() as conn:
+        # Verificar que la película existe
+        exists = await conn.execute(
+            text("SELECT 1 FROM movies WHERE movie_id = :id"),
+            {"id": id_pelicula}
+        )
+        if not exists.first():
+            return jsonify({"error": "Película no encontrada"}), 404
+
+        # Buscar si el usuario ha valorado la película
+        row = await conn.execute(
+            text("""
+                SELECT score
+                FROM ratings
+                WHERE movie_id = :movie_id AND uuid_user = :uid
+            """),
+            {"movie_id": id_pelicula, "uid": uid}
+        )
+        rating = row.first()
+
+        if rating is None:
+            return jsonify({
+                "movieid": id_pelicula,
+                "uuid_user": uid,
+                "rated": False,
+                "score": None
+            }), 200
+        
+        return jsonify({
+            "movieid": id_pelicula,
+            "uuid_user": uid,
+            "rated": True,
+            "score": rating[0]
+        }), 200
+
 #crear pelicula
 @app.post("/movies")
 async def create_movie():
@@ -907,7 +950,8 @@ async def delete_user_country(pais):
     if not is_admin(request.headers):
         return jsonify({"error": "No autorizado"}), 403
 
-    async with engine.connect() as conn:
+    async with engine.begin() as conn:
+        # Verificar que existen usuarios del país
         exists = await conn.execute(
             text("SELECT COUNT(*) FROM users WHERE LOWER(nationality) = LOWER(:pais)"),
             {"pais": pais})
@@ -916,8 +960,8 @@ async def delete_user_country(pais):
         if count == 0:
             return jsonify({"error": f"No hay usuarios del país {pais}"}), 404
         
-        trans = await conn.begin()
         try:
+            # Orden correcto: eliminar primero las tablas que tienen FK a users
             await conn.execute(
                 text("DELETE FROM shopping_cart WHERE uuid_user IN (SELECT uuid_user FROM users WHERE LOWER(nationality) = LOWER(:pais))"),
                 {"pais": pais})
@@ -942,24 +986,30 @@ async def delete_user_country(pais):
                 text("DELETE FROM orders WHERE uuid_user IN (SELECT uuid_user FROM users WHERE LOWER(nationality) = LOWER(:pais))"),
                 {"pais": pais})
             
+            # Finalmente eliminamos los usuarios
             await conn.execute(
                 text("DELETE FROM users WHERE LOWER(nationality) = LOWER(:pais)"),
                 {"pais": pais})
             
-            await trans.commit()
+            # El commit es automático al salir de engine.begin()
             
         except Exception as e:
-            await trans.rollback()
+            # El rollback es automático si hay excepción
             return jsonify({"error": f"Error al eliminar usuarios: {str(e)}"}), 500
     
     return jsonify({"deleted_country": pais, "deleted_users": count}), 200
 
 @app.delete("/borraPaisIncorrecto/<pais>")
 async def delete_user_country_incorrect(pais):
+    """
+    Transacción incorrecta: intenta eliminar users antes que las tablas dependientes.
+    Esto genera un error de foreign key y hace rollback completo.
+    """
     if not is_admin(request.headers):
         return jsonify({"error": "No autorizado"}), 403
 
-    async with engine.connect() as conn:
+    async with engine.begin() as conn:
+        # Verificar que existen usuarios del país
         exists = await conn.execute(
             text("SELECT COUNT(*) FROM users WHERE LOWER(nationality) = LOWER(:pais)"),
             {"pais": pais})
@@ -968,9 +1018,8 @@ async def delete_user_country_incorrect(pais):
         if count == 0:
             return jsonify({"error": f"No hay usuarios del país {pais}"}), 404
         
-        trans = await conn.begin()
-
         try:
+            # Eliminamos algunas tablas dependientes
             await conn.execute(
                 text("DELETE FROM shopping_cart WHERE uuid_user IN (SELECT uuid_user FROM users WHERE LOWER(nationality) = LOWER(:pais))"),
                 {"pais": pais})
@@ -979,11 +1028,12 @@ async def delete_user_country_incorrect(pais):
                 text("DELETE FROM cart_totals WHERE uuid_user IN (SELECT uuid_user FROM users WHERE LOWER(nationality) = LOWER(:pais))"),
                 {"pais": pais})
             
-            #momento en el que borramos antes de tiempo los registros en la tabla user y aun tienen hijos, lo que lanzara el error de fk
+            # ERROR: Intentamos borrar users mientras aún tienen referencias, lo que se conoce como hijos que quedan huérfanos
             await conn.execute(
                 text("DELETE FROM users WHERE LOWER(nationality) = LOWER(:pais)"),
                 {"pais": pais})
             
+            # Estas líneas nunca se ejecutarán debido al error anterior
             await conn.execute(
                 text("DELETE FROM ratings WHERE uuid_user IN (SELECT uuid_user FROM users WHERE LOWER(nationality) = LOWER(:pais))"),
                 {"pais": pais})
@@ -1000,20 +1050,28 @@ async def delete_user_country_incorrect(pais):
                 text("DELETE FROM orders WHERE uuid_user IN (SELECT uuid_user FROM users WHERE LOWER(nationality) = LOWER(:pais))"),
                 {"pais": pais})
             
-            await trans.commit()
-        
         except IntegrityError as e:
-            await trans.rollback()
-            print("Error de clave foránea:", e)
+            # El rollback es automático con engine.begin()
+            print(f"Error de clave foránea esperado: {e}")
             return jsonify({"error": "Error de foreign key. Rollback realizado"}), 409
+        except Exception as e:
+            print(f"Error inesperado: {e}")
+            return jsonify({"error": f"Error inesperado: {str(e)}"}), 500
     
+    # Esta línea nunca debería ejecutarse si todo funciona correctamente
     return jsonify({"deleted_country": pais, "deleted_users": count}), 200
 
 @app.delete("/borraPaisIntermedio/<pais>")
 async def delete_user_country_intermediate(pais):
+    """
+    Transacción con commit intermedio: hace commit de ratings y user_movie,
+    luego intenta una segunda transacción que falla. El primer commit persiste,
+    pero el segundo hace rollback.
+    """
     if not is_admin(request.headers):
         return jsonify({"error": "No autorizado"}), 403
 
+    # verificar existencia
     async with engine.connect() as conn:
         exists = await conn.execute(
             text("SELECT COUNT(*) FROM users WHERE LOWER(nationality) = LOWER(:pais)"),
@@ -1022,32 +1080,35 @@ async def delete_user_country_intermediate(pais):
 
         if count == 0:
             return jsonify({"error": f"No hay usuarios del país {pais}"}), 404
-        
-        trans = await conn.begin()
-
-        try:
-            await conn.execute(
-                text("DELETE FROM shopping_cart WHERE uuid_user IN (SELECT uuid_user FROM users WHERE LOWER(nationality) = LOWER(:pais))"),
-                {"pais": pais})
-            
-            await conn.execute(
-                text("DELETE FROM cart_totals WHERE uuid_user IN (SELECT uuid_user FROM users WHERE LOWER(nationality) = LOWER(:pais))"),
-                {"pais": pais})
-            
-            await trans.commit() #hacemos el commit antes de producir el fallo, para que se guarde lo anterior al error
-            trans = await conn.begin() #abrimos nueva transaccion
-
-            #provocamos el error que hara saltar la excepcion por eliminar registros con hijos
-            await conn.execute(
-                text("DELETE FROM users WHERE LOWER(nationality) = LOWER(:pais)"),
-                {"pais": pais})
-            
+    
+    # primera transacción (se commitea)
+    try:
+        async with engine.begin() as conn:
+            # Eliminamos ratings y user_movie
             await conn.execute(
                 text("DELETE FROM ratings WHERE uuid_user IN (SELECT uuid_user FROM users WHERE LOWER(nationality) = LOWER(:pais))"),
                 {"pais": pais})
             
             await conn.execute(
                 text("DELETE FROM user_movie WHERE uuid_user IN (SELECT uuid_user FROM users WHERE LOWER(nationality) = LOWER(:pais))"),
+                {"pais": pais})
+            
+            # Al salir de este bloque, se hace COMMIT automático
+        
+        # segunda transacción (fallará y hará rollback)
+        async with engine.begin() as conn:
+            # ERROR: Intentamos borrar users mientras aún tienen referencias en orders
+            await conn.execute(
+                text("DELETE FROM users WHERE LOWER(nationality) = LOWER(:pais)"),
+                {"pais": pais})
+            
+            # Estas líneas no se ejecutarán debido al error
+            await conn.execute(
+                text("DELETE FROM shopping_cart WHERE uuid_user IN (SELECT uuid_user FROM users WHERE LOWER(nationality) = LOWER(:pais))"),
+                {"pais": pais})
+            
+            await conn.execute(
+                text("DELETE FROM cart_totals WHERE uuid_user IN (SELECT uuid_user FROM users WHERE LOWER(nationality) = LOWER(:pais))"),
                 {"pais": pais})
             
             await conn.execute(
@@ -1057,12 +1118,15 @@ async def delete_user_country_intermediate(pais):
             await conn.execute(
                 text("DELETE FROM orders WHERE uuid_user IN (SELECT uuid_user FROM users WHERE LOWER(nationality) = LOWER(:pais))"),
                 {"pais": pais})
-            
-            await trans.commit()
+    
+    except IntegrityError as e:
+        # El rollback es automático solo para la segunda transacción
+        # La primera transacción sí se commiteó
+        print(f"Error de clave foránea en segunda transacción: {e}")
+        return jsonify({"error": "Error de foreign key. Rollback de segunda transacción realizado. Primer commit persiste."}), 409
+    except Exception as e:
+        print(f"Error inesperado: {e}")
+        return jsonify({"error": f"Error inesperado: {str(e)}"}), 500
 
-        except IntegrityError as e:
-            await trans.rollback() #El rollback debe ser al commit anterior, es decir se deben haber eliminado las dos entradas previas al error
-            print("Error de clave foránea:", e)
-            return jsonify({"error": "Error de foreign key. Rollback realizado"}), 409
-
+    # Esta línea nunca debería ejecutarse
     return jsonify({"deleted_country": pais, "deleted_users": count}), 200

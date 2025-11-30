@@ -175,8 +175,13 @@ def main():
     # 14. Estadística de ventas
     # ==========================================================
     print("\n# Estadística de ventas año/país")
-    r = requests.get(f"{CATALOG}/estadisticaVentas/2024/España", headers=headers)
+    r = requests.get(f"{CATALOG}/estadisticaVentas/2024/spain", headers=headers)
     ok("Consulta estadística", r.status_code == HTTPStatus.OK)
+    if r.status_code == HTTPStatus.OK:
+        data = r.json()
+        print(f"Total de pedidos efectuados por españoles en 2024: {data['count']}")
+        for order in data["orders"]:
+            print(f"User : {order["uuid_user"]} Date: {order["order_date"]} Amount: {order["total"]}")
 
     # ==========================================================
     # 15. Clientes sin pedidos
@@ -184,6 +189,102 @@ def main():
     print("\n# Clientes sin pedidos")
     r = requests.get(f"{CATALOG}/clientesSinPedidos", headers=headers)
     ok("Consultar clientes sin pedidos", r.status_code == HTTPStatus.OK)
+    if r.status_code == HTTPStatus.OK:
+        data = r.json()
+        print(f"Total de clientes sin pedidos: {data['count']}")
+        for user in data["users"]:
+            print(f"  - {user['name']} (UUID: {user['uuid_user']})\n")
+
+    # ==========================================================
+    # 16. Comprobación de las transacciones
+    # ==========================================================
+
+    # ==========================================================
+    # 16.1
+    # ==========================================================
+    print("\n# Transacción con error y rollback")
+    r = requests.delete(f"{CATALOG}/borraPaisIncorrecto/andorra", headers=headers_admin)
+    
+    if ok(f"Error esperado (409)", r.status_code == HTTPStatus.CONFLICT):
+        print(f"Respuesta: {r.json()}")
+        print(f"Rollback ejecutado correctamente")
+        print(f"Los datos no deben haberse eliminado")
+    else:
+        print(f"Código de estado inesperado: {r.status_code}: {r.text}")
+    
+    # Verificar que los usuarios siguen existiendo
+    print(f"\n Verificando que los usuarios de andorra siguen existiendo")
+    r = requests.get(f"{USERS}/user", json={"name": "Elena Torres", "password": "123456"})
+    if ok("Usuario sigue existiendo después del rollback", r.status_code == HTTPStatus.OK):
+        print(f"El rollback funcionó: los datos permanecen intactos")
+
+    # ==========================================================
+    # 16.2
+    # ==========================================================
+    print("\n# Commit intermedio y error")
+    print("Verificamos antes que los usuarios de andorra tienen ratings antes del test")
+    
+    r = requests.get(f"{USERS}/user", json={"name": "Elena Torres", "password": "123456"})
+    if r.status_code == HTTPStatus.OK:
+        data = r.json()
+        elena_token = data["token"]
+        elena_headers = {"Authorization": f"Bearer {elena_token}"}
+        
+        # Añadir un rating si no existe para tener datos que eliminar
+        r = requests.get(f"{CATALOG}/movies", headers=elena_headers)
+        if r.status_code == HTTPStatus.OK and r.json():
+            data = r.json()
+            movie_id = data[0]["movieid"]
+            requests.post(f"{CATALOG}/movies/{movie_id}/vote", json={"score": 5}, headers=elena_headers)
+            print(f"Rating creado para Elena Torres en película {movie_id}")
+    
+    # Ejecutar la transacción intermedia
+    r = requests.delete(f"{CATALOG}/borraPaisIntermedio/andorra", headers=headers_admin)
+    
+    if ok(f"Error esperado (409)", r.status_code == HTTPStatus.CONFLICT):
+        print(f"Respuesta: {r.json()}")
+        print(f"Rollback de la segunda transacción ejecutado")
+        print(f"Los cambios previos al commit deben persistir")
+    else:
+        print(f"Código de estado inesperado: {r.status_code}: {r.text}")
+    
+    # Verificar estado final
+    print(f"Los usuarios de andorra deben seguir existiendo a causa del rollback")
+    print(f"Pero sus ratings y user_movie deben estar eliminados por el commit intermedio")
+    
+    r = requests.get(f"{USERS}/user", json={"name": "Elena Torres", "password": "123456"})
+    if ok("Usuario Elena Torres sigue existiendo", r.status_code == HTTPStatus.OK):
+        data = r.json()
+        elena_token = data["token"]
+        elena_headers = {"Authorization": f"Bearer {elena_token}"}
+        print(f"El usuario persiste")
+        
+        # Verificar que el rating de Elena fue eliminado por el commit intermedio
+        r = requests.get(f"{CATALOG}/movies/{movie_id}/user_rating", headers=elena_headers)
+        if r.status_code == HTTPStatus.OK:
+            data = r.json()
+            if ok("Rating de Elena fue eliminado por commit intermedio", data["rated"] == False):
+                print(f"El rating de Elena en película {movie_id} fue eliminado correctamente")
+                print(f"Esto demuestra que el commit intermedio ha persistido")
+            else:
+                print(f"Error. El rating todavía existe: {data}")
+        else:
+            print(f"Error al consultar user_rating: {r.status_code}")
+    else:
+        print(f"Error: Usuario Elena Torres no existe después de rollback")
+
+    # ==========================================================
+    # 16.3
+    # ==========================================================
+    print("\n# Transacción correcta")
+    r = requests.delete(f"{CATALOG}/borraPais/andorra", headers=headers_admin)
+    
+    if ok(f"Borrado correcto de usuarios de andorra", r.status_code == HTTPStatus.OK):
+        data = r.json()
+        print(f"Usuarios eliminados: {data["deleted_users"]}")
+        print(f"País eliminado {data["deleted_country"]}")
+    else:
+        print(f"Error inesperado: {r.status_code}: {r.text}")
 
     print("\n==============================================")
     print("           TESTER COMPLETADO")
