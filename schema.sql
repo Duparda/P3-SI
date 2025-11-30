@@ -1,6 +1,5 @@
 -- Eliminar tablas si existen (para poder recrear el esquema)
 DROP TABLE IF EXISTS shopping_cart CASCADE;
-DROP TABLE IF EXISTS user_movie CASCADE;
 DROP TABLE IF EXISTS movie_actor CASCADE;
 DROP TABLE IF EXISTS movies CASCADE;
 DROP TABLE IF EXISTS actors CASCADE;
@@ -57,14 +56,6 @@ CREATE TABLE movie_actor (
     paper VARCHAR(100),
     is_lead BOOLEAN DEFAULT FALSE,
     PRIMARY KEY (movie_id, actor_id)
-);
-
--- TABLA: user_movie
-CREATE TABLE user_movie (
-    uuid_user VARCHAR(100) REFERENCES users(uuid_user),
-    movie_id INTEGER REFERENCES movies(movie_id) ON DELETE CASCADE,
-    score INTEGER CHECK (score >= 1 AND score <= 10),
-    PRIMARY KEY (uuid_user, movie_id)
 );
 
 -- TABLA: shopping_cart

@@ -69,7 +69,7 @@ BEGIN
             SET stock = stock + cantidad_diff
             WHERE movie_id = OLD.movie_id;
         END IF;
-        
+
         PERFORM actualizar_total_carrito(OLD.uuid_user);
         RETURN OLD;
     END IF;
@@ -147,6 +147,8 @@ BEGIN
     UPDATE users
     SET balance = balance - precio_final
     WHERE uuid_user = NEW.uuid_user;
+    -- sleep
+    --PERFORM pg_sleep(15);
 
     RETURN NEW;
 END;

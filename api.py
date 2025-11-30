@@ -450,7 +450,7 @@ async def get_movie(id_pelicula: int):
     async with engine.connect() as conn:
         row = await conn.execute(
             text("""
-                SELECT m.movie_id, m.title, m.descriptionn, m.price, m.year_release, g.namee as genre
+                SELECT m.movie_id, m.title, m.descriptionn, m.price, m.year_release, m.stock, g.namee as genre
                 FROM movies m
                 LEFT JOIN genres g ON m.genre_id = g.genre_id
                 WHERE m.movie_id = :id """), {"id": id_pelicula})
@@ -464,6 +464,7 @@ async def get_movie(id_pelicula: int):
         "description": m["descriptionn"],
         "price": float(m["price"]),
         "year": m["year_release"],
+        "stock": m["stock"],
         "genre": m["genre"]}), 200
 
 #obtener las n películas más votadas
@@ -974,10 +975,6 @@ async def delete_user_country(pais):
                 {"pais": pais})
             
             await conn.execute(
-                text("DELETE FROM user_movie WHERE uuid_user IN (SELECT uuid_user FROM users WHERE LOWER(nationality) = LOWER(:pais))"),
-                {"pais": pais})
-            
-            await conn.execute(
                 text("DELETE FROM order_details WHERE order_id IN (SELECT order_id FROM orders WHERE uuid_user IN (SELECT uuid_user FROM users WHERE LOWER(nationality) = LOWER(:pais)))"),
                 {"pais": pais})
             
@@ -1018,7 +1015,7 @@ async def delete_user_country_incorrect(pais):
             return jsonify({"error": f"No hay usuarios del país {pais}"}), 404
         
         try:
-            # Eliminamos algunas tablas dependientes
+            # Eliminamos solo algunas tablas dependientes (no todas)
             await conn.execute(
                 text("DELETE FROM shopping_cart WHERE uuid_user IN (SELECT uuid_user FROM users WHERE LOWER(nationality) = LOWER(:pais))"),
                 {"pais": pais})
@@ -1027,26 +1024,10 @@ async def delete_user_country_incorrect(pais):
                 text("DELETE FROM cart_totals WHERE uuid_user IN (SELECT uuid_user FROM users WHERE LOWER(nationality) = LOWER(:pais))"),
                 {"pais": pais})
             
-            # ERROR: Intentamos borrar users mientras aún tienen referencias, lo que se conoce como hijos que quedan huérfanos
+            # ERROR: Intentamos borrar users mientras aún tienen referencias en orders, ratings, etc.
+            # Esto causará un error de foreign key porque orders tiene foreign key a users
             await conn.execute(
                 text("DELETE FROM users WHERE LOWER(nationality) = LOWER(:pais)"),
-                {"pais": pais})
-            
-            # Estas líneas nunca se ejecutarán debido al error anterior
-            await conn.execute(
-                text("DELETE FROM ratings WHERE uuid_user IN (SELECT uuid_user FROM users WHERE LOWER(nationality) = LOWER(:pais))"),
-                {"pais": pais})
-            
-            await conn.execute(
-                text("DELETE FROM user_movie WHERE uuid_user IN (SELECT uuid_user FROM users WHERE LOWER(nationality) = LOWER(:pais))"),
-                {"pais": pais})
-            
-            await conn.execute(
-                text("DELETE FROM order_details WHERE order_id IN (SELECT order_id FROM orders WHERE uuid_user IN (SELECT uuid_user FROM users WHERE LOWER(nationality) = LOWER(:pais)))"),
-                {"pais": pais})
-            
-            await conn.execute(
-                text("DELETE FROM orders WHERE uuid_user IN (SELECT uuid_user FROM users WHERE LOWER(nationality) = LOWER(:pais))"),
                 {"pais": pais})
             
         except IntegrityError as e:
@@ -1086,10 +1067,6 @@ async def delete_user_country_intermediate(pais):
             # Eliminamos ratings y user_movie
             await conn.execute(
                 text("DELETE FROM ratings WHERE uuid_user IN (SELECT uuid_user FROM users WHERE LOWER(nationality) = LOWER(:pais))"),
-                {"pais": pais})
-            
-            await conn.execute(
-                text("DELETE FROM user_movie WHERE uuid_user IN (SELECT uuid_user FROM users WHERE LOWER(nationality) = LOWER(:pais))"),
                 {"pais": pais})
             
             # Al salir de este bloque, se hace COMMIT automático
